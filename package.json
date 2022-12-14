@@ -10,6 +10,9 @@
     "require": "./dist/index.cjs",
     "import": "./dist/index.js"
   },
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "clean": "rimraf dist/*",
     "prettier": "prettier --write \"{src,tests}/**/*.{js,ts,json}\"",
