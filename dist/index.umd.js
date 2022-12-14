@@ -1,1 +1,37 @@
-!function(e,t){"object"==typeof exports&&"undefined"!=typeof module?t(exports):"function"==typeof define&&define.amd?define(["exports"],t):t((e="undefined"!=typeof globalThis?globalThis:e||self).searchable={})}(this,(function(e){"use strict";e.createPubSub=()=>{const e=new Map,t=t=>(e.has(t)||e.set(t,new Set),e.get(t)),n=(e,n)=>{if("function"!=typeof n)throw new TypeError("Expecting callback function as second argument");return t(e).add(n),()=>t(e).delete(n)};return{publish:(e,n={})=>{t(e).forEach((e=>e(n)))},subscribe:n,subscribeOnce:(e,t)=>{const o=n(e,(e=>{t(e),o()}));return o},unsubscribeAll:t=>e.delete(t)}}}));
+(function (global, factory) {
+    typeof exports === 'object' && typeof module !== 'undefined' ? factory(exports) :
+    typeof define === 'function' && define.amd ? define(['exports'], factory) :
+    (global = typeof globalThis !== 'undefined' ? globalThis : global || self, factory(global.pubsub = {}));
+})(this, (function (exports) { 'use strict';
+
+    const createPubSub = () => {
+        const _subs = new Map();
+        const _subsFor = (event) => {
+            if (!_subs.has(event))
+                _subs.set(event, new Set());
+            return _subs.get(event);
+        };
+        const publish = (event, detail = {}) => {
+            _subsFor(event).forEach((cb) => cb(detail));
+        };
+        const subscribe = (event, cb) => {
+            if (typeof cb !== 'function') {
+                throw new TypeError(`Expecting callback function as second argument`);
+            }
+            _subsFor(event).add(cb);
+            return () => _subsFor(event).delete(cb);
+        };
+        const subscribeOnce = (event, cb) => {
+            const unsub = subscribe(event, (data) => {
+                cb(data);
+                unsub();
+            });
+            return unsub;
+        };
+        const unsubscribeAll = (event) => _subs.delete(event);
+        return { publish, subscribe, subscribeOnce, unsubscribeAll };
+    };
+
+    exports.createPubSub = createPubSub;
+
+}));

@@ -1,1 +1,31 @@
-"use strict";exports.createPubSub=()=>{const e=new Map,t=t=>(e.has(t)||e.set(t,new Set),e.get(t)),r=(e,r)=>{if("function"!=typeof r)throw new TypeError("Expecting callback function as second argument");return t(e).add(r),()=>t(e).delete(r)};return{publish:(e,r={})=>{t(e).forEach((e=>e(r)))},subscribe:r,subscribeOnce:(e,t)=>{const n=r(e,(e=>{t(e),n()}));return n},unsubscribeAll:t=>e.delete(t)}};
+'use strict';
+
+const createPubSub = () => {
+    const _subs = new Map();
+    const _subsFor = (event) => {
+        if (!_subs.has(event))
+            _subs.set(event, new Set());
+        return _subs.get(event);
+    };
+    const publish = (event, detail = {}) => {
+        _subsFor(event).forEach((cb) => cb(detail));
+    };
+    const subscribe = (event, cb) => {
+        if (typeof cb !== 'function') {
+            throw new TypeError(`Expecting callback function as second argument`);
+        }
+        _subsFor(event).add(cb);
+        return () => _subsFor(event).delete(cb);
+    };
+    const subscribeOnce = (event, cb) => {
+        const unsub = subscribe(event, (data) => {
+            cb(data);
+            unsub();
+        });
+        return unsub;
+    };
+    const unsubscribeAll = (event) => _subs.delete(event);
+    return { publish, subscribe, subscribeOnce, unsubscribeAll };
+};
+
+exports.createPubSub = createPubSub;

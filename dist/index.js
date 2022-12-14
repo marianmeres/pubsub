@@ -1,1 +1,29 @@
-const e=()=>{const e=new Map,n=n=>(e.has(n)||e.set(n,new Set),e.get(n)),t=(e,t)=>{if("function"!=typeof t)throw new TypeError("Expecting callback function as second argument");return n(e).add(t),()=>n(e).delete(t)};return{publish:(e,t={})=>{n(e).forEach((e=>e(t)))},subscribe:t,subscribeOnce:(e,n)=>{const r=t(e,(e=>{n(e),r()}));return r},unsubscribeAll:n=>e.delete(n)}};export{e as createPubSub};
+const createPubSub = () => {
+    const _subs = new Map();
+    const _subsFor = (event) => {
+        if (!_subs.has(event))
+            _subs.set(event, new Set());
+        return _subs.get(event);
+    };
+    const publish = (event, detail = {}) => {
+        _subsFor(event).forEach((cb) => cb(detail));
+    };
+    const subscribe = (event, cb) => {
+        if (typeof cb !== 'function') {
+            throw new TypeError(`Expecting callback function as second argument`);
+        }
+        _subsFor(event).add(cb);
+        return () => _subsFor(event).delete(cb);
+    };
+    const subscribeOnce = (event, cb) => {
+        const unsub = subscribe(event, (data) => {
+            cb(data);
+            unsub();
+        });
+        return unsub;
+    };
+    const unsubscribeAll = (event) => _subs.delete(event);
+    return { publish, subscribe, subscribeOnce, unsubscribeAll };
+};
+
+export { createPubSub };
