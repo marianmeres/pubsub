@@ -48,7 +48,7 @@ suite.test('subscribe once unsub early works', () => {
 	const log = [];
 	const ps = createPubSub();
 
-	// immediatelly unsubscribe
+	// immediately unsubscribe
 	const unsub = ps.subscribeOnce('foo', (data) => log.push(data));
 	unsub();
 
