@@ -7,7 +7,7 @@ const createPubSub = () => {
             _subs.set(event, new Set());
         return _subs.get(event);
     };
-    const publish = (event, detail = {}) => {
+    const publish = (event, detail) => {
         _subsFor(event).forEach((cb) => cb(detail));
     };
     const subscribe = (event, cb) => {

@@ -5,7 +5,7 @@ export const createPubSub = () => {
 		return _subs.get(event);
 	};
 
-	const publish = (event: string, detail = {}) => {
+	const publish = (event: string, detail: any) => {
 		_subsFor(event).forEach((cb: Function) => cb(detail));
 	};
 

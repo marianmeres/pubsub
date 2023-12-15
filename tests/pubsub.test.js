@@ -57,5 +57,20 @@ suite.test('subscribe once unsub early works', () => {
 	assert(!log.length);
 });
 
+suite.test('publish undefined', () => {
+	const log = [];
+	const ps = createPubSub();
+	const unsub = ps.subscribe('foo', (data) => log.push(data));
+
+	ps.publish('foo');
+	ps.publish('foo', undefined);
+
+	assert(log.length === 2);
+	assert(log[0] === undefined);
+	assert(log[1] === undefined);
+
+	unsub();
+});
+
 //
 export default suite;
