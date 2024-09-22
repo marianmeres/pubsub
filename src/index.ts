@@ -10,8 +10,11 @@ export const createPubSub = () => {
 	};
 
 	const subscribe = (event: string, cb: CallableFunction) => {
+		if (!event) {
+			throw new TypeError(`Expecting valid event name.`);
+		}
 		if (typeof cb !== 'function') {
-			throw new TypeError(`Expecting callback function as second argument`);
+			throw new TypeError(`Expecting valid callback function.`);
 		}
 		_subsFor(event).add(cb);
 		return () => _subsFor(event).delete(cb);
