@@ -29,6 +29,6 @@ unsub();
 unsubscribe('foo', console.log);
 unsubscribeAll('foo');
 
-// no-op as no subscription exists
+// now this is a no-op as no subscription exists
 publish('foo', 'baz');
 ```
