@@ -3,19 +3,32 @@
 Basic publish-subscribe.
 
 ## Install
+
 ```shell
 $ npm i @marianmeres/pubsub
 ```
 
 ## Usage
 
-```typescript
-const { publish, subscribe, subscribeOnce, unsubscribeAll } = createPubSub();
+```javascript
+import { createPubSub } from '@marianmeres/pubsub;
+```
 
-const unsubscribe = subscribe('foo', (data) => {
-	console.log(data);
-});
+```javascript
+const { publish, subscribe, subscribeOnce, unsubscribe, unsubscribeAll } = createPubSub();
 
-// logs 'bar'
-publish('foo', 'bar');
+// create subscription (returns unsub function)
+const unsub = subscribe('foo', console.log);
+
+// publish
+publish('foo', 'bar'); // logs 'bar'
+
+// unsubscribe
+unsub();
+// or more general alternatives to above
+unsubscribe('foo', console.log);
+unsubscribeAll('foo');
+
+// no-op as no subscription exists
+publish('foo', 'baz');
 ```
