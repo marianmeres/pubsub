@@ -72,5 +72,24 @@ suite.test('publish undefined', () => {
 	unsub();
 });
 
+suite.test('outer unsubscribe', () => {
+	const log = [];
+	const ps = createPubSub();
+	const fn = (data) => log.push(data);
+	ps.subscribe('foo', fn);
+
+	ps.publish('must be ignored');
+
+	ps.publish('foo');
+	assert(log.length === 1);
+
+	ps.unsubscribe('foo', fn);
+	ps.publish('foo'); // must have no effect
+	assert(log.length === 1);
+
+	ps.unsubscribe(() => null); // noop
+	ps.unsubscribe(123); // noop
+});
+
 //
 export default suite;

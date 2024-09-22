@@ -15,6 +15,9 @@ const createPubSub = () => {
         _subsFor(event).add(cb);
         return () => _subsFor(event).delete(cb);
     };
+    const unsubscribe = (event, cb) => {
+        _subsFor(event).delete(cb);
+    };
     const subscribeOnce = (event, cb) => {
         const unsub = subscribe(event, (data) => {
             cb(data);
@@ -23,7 +26,7 @@ const createPubSub = () => {
         return unsub;
     };
     const unsubscribeAll = (event) => _subs.delete(event);
-    return { publish, subscribe, subscribeOnce, unsubscribeAll };
+    return { publish, subscribe, subscribeOnce, unsubscribe, unsubscribeAll };
 };
 
 export { createPubSub };

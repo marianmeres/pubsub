@@ -6,10 +6,10 @@ export const createPubSub = () => {
 	};
 
 	const publish = (event: string, detail: any) => {
-		_subsFor(event).forEach((cb: Function) => cb(detail));
+		_subsFor(event).forEach((cb: CallableFunction) => cb(detail));
 	};
 
-	const subscribe = (event: string, cb: Function) => {
+	const subscribe = (event: string, cb: CallableFunction) => {
 		if (typeof cb !== 'function') {
 			throw new TypeError(`Expecting callback function as second argument`);
 		}
@@ -17,7 +17,11 @@ export const createPubSub = () => {
 		return () => _subsFor(event).delete(cb);
 	};
 
-	const subscribeOnce = (event: string, cb: Function) => {
+	const unsubscribe = (event: string, cb: CallableFunction) => {
+		_subsFor(event).delete(cb);
+	};
+
+	const subscribeOnce = (event: string, cb: CallableFunction) => {
 		const unsub = subscribe(event, (data: any) => {
 			cb(data);
 			unsub();
@@ -27,5 +31,5 @@ export const createPubSub = () => {
 
 	const unsubscribeAll = (event: string) => _subs.delete(event);
 
-	return { publish, subscribe, subscribeOnce, unsubscribeAll };
+	return { publish, subscribe, subscribeOnce, unsubscribe, unsubscribeAll };
 };
