@@ -40,14 +40,14 @@
 	"devDependencies": {
 		"@marianmeres/release": "^1.0.0",
 		"@marianmeres/test-runner": "^2.0.13",
-		"@rollup/plugin-commonjs": "^23.0.4",
-		"@rollup/plugin-node-resolve": "^15.0.1",
-		"@rollup/plugin-typescript": "^10.0.1",
+		"@rollup/plugin-commonjs": "^25.0.7",
+		"@rollup/plugin-node-resolve": "^15.2.3",
+		"@rollup/plugin-typescript": "^11.1.5",
 		"@types/node": "^18.11.15",
 		"nodemon": "^3.0.2",
-		"prettier": "^2.8.1",
-		"rimraf": "^3.0.2",
-		"rollup": "^3.7.4",
-		"tslib": "^2.4.1"
+		"prettier": "^3.1.1",
+		"rimraf": "^5.0.5",
+		"rollup": "^4.9.0",
+		"tslib": "^2.6.2"
 	}
 }
