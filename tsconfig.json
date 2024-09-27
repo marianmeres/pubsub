@@ -2,19 +2,14 @@
 	"include": ["src"],
 	"exclude": ["node_modules"],
 	"compilerOptions": {
-		"lib": ["esnext"],
-		"target": "esnext",
-		"module": "NodeNext",
-		"rootDir": "./src",
-		"outDir": "./dist",
-		"baseUrl": "./",
+		"target": "es6",
+		"module": "ESNext",
+		"rootDir": "src",
+		"outDir": "dist",
 		"esModuleInterop": true,
-		"moduleResolution": "NodeNext",
-		"pretty": true,
 		"skipLibCheck": true,
 		"strict": true,
 		"forceConsistentCasingInFileNames": true,
-		"declaration": true,
-		"types": ["node"]
+		"declaration": true
 	}
 }
