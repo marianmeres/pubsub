@@ -3,7 +3,9 @@
 Basic publish-subscribe.
 
 ## Install
-
+```sh
+deno add jsr:@marianmeres/pubsub
+```
 ```shell
 $ npm i @marianmeres/pubsub
 ```
