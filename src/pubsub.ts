@@ -4,7 +4,7 @@
 export type Subscriber = (detail: any) => void;
 
 /** The unsubscribe callback */
-export type Unsubscriber = () => void;
+export type Unsubscriber = () => void | boolean;
 
 /**
  * Basic publish-subscribe.
@@ -24,7 +24,7 @@ export class PubSub {
 	}
 
 	/** Subscribe to a topic */
-	subscribe(topic: string, cb: Subscriber) {
+	subscribe(topic: string, cb: Subscriber): Unsubscriber {
 		if (!this.#subs.has(topic)) {
 			this.#subs.set(topic, new Set<Subscriber>());
 		}
@@ -55,8 +55,8 @@ export class PubSub {
 		return removed;
 	}
 
-	/** Subscribe to a topic only for the first publish event */
-	subscribeOnce(topic: string, cb: Subscriber) {
+	/** Subscribe to a topic only for the first published topic */
+	subscribeOnce(topic: string, cb: Subscriber): Unsubscriber {
 		const onceWrapper = (data: any) => {
 			cb(data);
 			this.unsubscribe(topic, onceWrapper);
@@ -66,7 +66,7 @@ export class PubSub {
 
 	/** Unsubscribe all callbacks from a specific topic.
 	 * If no topic is provided, unsubscribe from all topics. */
-	unsubscribeAll(topic?: string) {
+	unsubscribeAll(topic?: string): boolean {
 		// If topic is provided, clear only that topic
 		if (topic) {
 			if (!this.#subs.has(topic)) {
