@@ -13,7 +13,7 @@ npm install @marianmeres/pubsub
 ## Usage
 
 ```js
-import { createPubSub } from '@marianmeres/pubsub;
+import { createPubSub } from '@marianmeres/pubsub';
 ```
 
 ```js
@@ -27,6 +27,7 @@ publish('foo', 'bar'); // logs 'bar'
 
 // unsubscribe
 unsub();
+
 // or more general alternatives to above
 unsubscribe('foo', console.log);
 unsubscribeAll('foo');
