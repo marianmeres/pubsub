@@ -6,17 +6,17 @@ Basic publish-subscribe.
 ```sh
 deno add jsr:@marianmeres/pubsub
 ```
-```shell
-$ npm i @marianmeres/pubsub
+```sh
+npm install @marianmeres/pubsub
 ```
 
 ## Usage
 
-```javascript
+```js
 import { createPubSub } from '@marianmeres/pubsub;
 ```
 
-```javascript
+```js
 const { publish, subscribe, subscribeOnce, unsubscribe, unsubscribeAll } = createPubSub();
 
 // create subscription (returns unsub function)
