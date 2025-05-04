@@ -10,7 +10,6 @@ export type Unsubscriber = () => void | boolean;
  * Basic publish-subscribe.
  *
  * "topic" and "event" are considered as synonyms.
- *
  */
 export class PubSub {
 	#subs = new Map<string, Set<Subscriber>>();
