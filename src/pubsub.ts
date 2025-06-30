@@ -16,10 +16,14 @@ export class PubSub {
 
 	/** Publish an event with optional data to all subscribers of a topic */
 	publish(topic: string, data?: any): boolean {
-		if (!this.#subs.has(topic)) return false;
+		this.#subs.get(topic)?.forEach((cb) => cb(data));
 
-		this.#subs.get(topic)!.forEach((cb) => cb(data));
-		return true;
+		// wildcard special case
+		if (topic !== "*") {
+			this.#subs.get("*")?.forEach((cb) => cb(data));
+		}
+
+		return this.#subs.has(topic);
 	}
 
 	/** Subscribe to a topic */

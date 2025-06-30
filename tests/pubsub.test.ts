@@ -120,3 +120,27 @@ Deno.test("unsubscribe all", () => {
 
 	assertEquals(log, [1, "bar"]);
 });
+
+Deno.test("wildcard", () => {
+	let log: any[] = [];
+	const ps = createPubSub();
+
+	const unsub = ps.subscribe("*", (data: any) => log.push("*:" + data));
+	ps.subscribe("foo", (data: any) => log.push(data));
+
+	ps.publish("foo", "foo");
+	ps.publish("bar", "bar");
+	ps.publish("baz", "baz");
+
+	// "foo" must be logged twice
+	assertEquals(log, ["foo", "*:foo", "*:bar", "*:baz"]);
+
+	unsub(); // unsub wildcard listener
+	log = [];
+
+	// wildcard must not be subscribed anymore
+	ps.publish("no effect");
+	assertEquals(log, []);
+
+	ps.unsubscribeAll();
+});
