@@ -85,7 +85,7 @@ export class PubSub {
 	}
 
 	/** For debugging */
-	__dump() {
+	__dump(): Record<string, Set<Subscriber>> {
 		return Object.fromEntries(this.#subs.entries());
 	}
 }
