@@ -83,6 +83,11 @@ export class PubSub {
 		this.#subs.clear();
 		return true;
 	}
+
+	/** For debugging */
+	__dump() {
+		return Object.fromEntries(this.#subs.entries());
+	}
 }
 
 /** Export factory fn for convenience as well */

@@ -18,9 +18,13 @@ Deno.test("pub sub works", () => {
 	assert(log.length === 1);
 	assert(log[0] === "bar");
 
+	assert(ps.__dump().foo);
+
 	unsub();
 	unsub(); // noop
 	unsub(); // noop
+
+	assert(!ps.__dump().foo);
 
 	ps.publish("foo", "baz");
 
@@ -135,12 +139,20 @@ Deno.test("wildcard", () => {
 	// "foo" must be logged twice
 	assertEquals(log, ["foo", "*:foo", "*:bar", "*:baz"]);
 
+	assert(ps.__dump()["*"]);
+	assert(ps.__dump().foo);
+
 	unsub(); // unsub wildcard listener
 	log = [];
+
+	assert(!ps.__dump()["*"]);
+	assert(ps.__dump().foo);
 
 	// wildcard must not be subscribed anymore
 	ps.publish("no effect");
 	assertEquals(log, []);
 
 	ps.unsubscribeAll();
+	assert(!ps.__dump()["*"]);
+	assert(!ps.__dump().foo);
 });
