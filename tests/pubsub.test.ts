@@ -156,3 +156,30 @@ Deno.test("wildcard", () => {
 	assert(!ps.__dump()["*"]);
 	assert(!ps.__dump().foo);
 });
+
+Deno.test("isSubscribed works", () => {
+	const cb = (_data: any) => undefined;
+	const ps = createPubSub();
+
+	// subscribe to all
+	ps.subscribe("*", cb);
+
+	// must be subscribed to "foo" because is subscribed to "*"
+	assert(ps.isSubscribed("foo", cb));
+	// but not if we exlude wildcard
+	assert(!ps.isSubscribed("foo", cb, false));
+
+	// now unsub all, to start fresh
+	ps.unsubscribeAll();
+
+	// is NOT
+	assert(!ps.isSubscribed("foo", cb));
+
+	// IS
+	ps.subscribe("foo", cb);
+	assert(ps.isSubscribed("foo", cb));
+
+	assert(!ps.isSubscribed("asdfasdf", cb));
+
+	ps.unsubscribeAll();
+});

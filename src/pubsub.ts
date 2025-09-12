@@ -84,6 +84,19 @@ export class PubSub {
 		return true;
 	}
 
+	/** Will check if give topic+cb exists */
+	isSubscribed(
+		topic: string,
+		cb: Subscriber,
+		considerWildcard = true
+	): boolean {
+		let has = !!this.#subs.get(topic)?.has(cb);
+		if (considerWildcard) {
+			has ||= !!this.#subs.get("*")?.has(cb);
+		}
+		return has;
+	}
+
 	/** For debugging */
 	__dump(): Record<string, Set<Subscriber>> {
 		return Object.fromEntries(this.#subs.entries());
