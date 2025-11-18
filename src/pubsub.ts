@@ -1,5 +1,3 @@
-// deno-lint-ignore-file no-explicit-any
-
 /** The subscribe callback */
 export type Subscriber = (detail: any) => void;
 
