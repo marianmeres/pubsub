@@ -18,7 +18,9 @@ export class PubSub {
 
 		// wildcard special case
 		if (topic !== "*") {
-			this.#subs.get("*")?.forEach((cb) => cb(data));
+			// we need to create an envelope here to know what the source event/topic was
+			// (using word "event" instead of "topic" here, feels more correct and expected)
+			this.#subs.get("*")?.forEach((cb) => cb({ event: topic, data }));
 		}
 
 		return this.#subs.has(topic);

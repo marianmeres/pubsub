@@ -129,15 +129,17 @@ Deno.test("wildcard", () => {
 	let log: any[] = [];
 	const ps = createPubSub();
 
-	const unsub = ps.subscribe("*", (data: any) => log.push("*:" + data));
+	const unsub = ps.subscribe("*", (data: any) =>
+		log.push(data.event + ":" + data.data)
+	);
 	ps.subscribe("foo", (data: any) => log.push(data));
 
 	ps.publish("foo", "foo");
 	ps.publish("bar", "bar");
-	ps.publish("baz", "baz");
+	ps.publish("baz", "foo"); // not baz here, just to test data.event and data.data envelope
 
 	// "foo" must be logged twice
-	assertEquals(log, ["foo", "*:foo", "*:bar", "*:baz"]);
+	assertEquals(log, ["foo", "foo:foo", "bar:bar", "baz:foo"]);
 
 	assert(ps.__dump()["*"]);
 	assert(ps.__dump().foo);
