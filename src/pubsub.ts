@@ -4,6 +4,15 @@ export type Subscriber = (detail: any) => void;
 /** The unsubscribe callback */
 export type Unsubscriber = () => void | boolean;
 
+/** Error handler callback */
+export type ErrorHandler = (error: Error, topic: string, isWildcard: boolean) => void;
+
+/** PubSub configuration options */
+export interface PubSubOptions {
+	/** Custom error handler for subscriber errors. Defaults to console.error. Set to () => {} for silent mode. */
+	onError?: ErrorHandler;
+}
+
 /**
  * Basic publish-subscribe.
  *
@@ -11,6 +20,16 @@ export type Unsubscriber = () => void | boolean;
  */
 export class PubSub {
 	#subs = new Map<string, Set<Subscriber>>();
+	#onError: ErrorHandler;
+
+	constructor(options?: PubSubOptions) {
+		this.#onError = options?.onError ?? this.#defaultErrorHandler;
+	}
+
+	#defaultErrorHandler(error: Error, topic: string, isWildcard: boolean): void {
+		const prefix = isWildcard ? "wildcard subscriber" : "subscriber";
+		console.error(`Error in ${prefix} for topic "${topic}":`, error);
+	}
 
 	/** Publish an event with optional data to all subscribers of a topic */
 	publish(topic: string, data?: any): boolean {
@@ -18,7 +37,7 @@ export class PubSub {
 			try {
 				cb(data);
 			} catch (error) {
-				console.error(`Error in subscriber for topic "${topic}":`, error);
+				this.#onError(error as Error, topic, false);
 			}
 		});
 
@@ -30,7 +49,7 @@ export class PubSub {
 				try {
 					cb({ event: topic, data });
 				} catch (error) {
-					console.error(`Error in wildcard subscriber for topic "${topic}":`, error);
+					this.#onError(error as Error, topic, true);
 				}
 			});
 		}
@@ -73,8 +92,12 @@ export class PubSub {
 	/** Subscribe to a topic only for the first published topic */
 	subscribeOnce(topic: string, cb: Subscriber): Unsubscriber {
 		const onceWrapper = (data: any) => {
-			cb(data);
-			this.unsubscribe(topic, onceWrapper);
+			try {
+				cb(data);
+			} finally {
+				// Always unsubscribe, even if the callback throws
+				this.unsubscribe(topic, onceWrapper);
+			}
 		};
 		return this.subscribe(topic, onceWrapper);
 	}
@@ -116,6 +139,6 @@ export class PubSub {
 }
 
 /** Export factory fn for convenience as well */
-export function createPubSub(): PubSub {
-	return new PubSub();
+export function createPubSub(options?: PubSubOptions): PubSub {
+	return new PubSub(options);
 }

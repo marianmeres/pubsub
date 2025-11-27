@@ -185,3 +185,111 @@ Deno.test("isSubscribed works", () => {
 
 	ps.unsubscribeAll();
 });
+
+Deno.test("error in subscriber does not break other subscribers", () => {
+	const log: any[] = [];
+	const ps = createPubSub({ onError: () => {} }); // silent mode for tests
+
+	// Subscribe first callback that will throw
+	ps.subscribe("foo", (_data: any) => {
+		throw new Error("Intentional error");
+	});
+
+	// Subscribe second callback that should still execute
+	ps.subscribe("foo", (data: any) => {
+		log.push(data);
+	});
+
+	// Subscribe third callback that should also execute
+	ps.subscribe("foo", (data: any) => {
+		log.push(data + "-second");
+	});
+
+	// Publish - first subscriber throws, but others should still execute
+	ps.publish("foo", "bar");
+
+	// Both non-throwing subscribers should have been called
+	assertEquals(log, ["bar", "bar-second"]);
+});
+
+Deno.test("error in wildcard subscriber does not break other subscribers", () => {
+	const log: any[] = [];
+	const ps = createPubSub({ onError: () => {} }); // silent mode for tests
+
+	// Subscribe wildcard that throws
+	ps.subscribe("*", (_envelope: any) => {
+		throw new Error("Wildcard error");
+	});
+
+	// Subscribe regular callback that should still execute
+	ps.subscribe("foo", (data: any) => {
+		log.push(data);
+	});
+
+	// Subscribe another wildcard that should still execute
+	ps.subscribe("*", (envelope: any) => {
+		log.push(envelope.event + ":" + envelope.data);
+	});
+
+	// Publish - first wildcard throws, but others should still execute
+	ps.publish("foo", "bar");
+
+	// Regular subscriber and second wildcard should have been called
+	assertEquals(log, ["bar", "foo:bar"]);
+});
+
+Deno.test("error in subscribeOnce does not prevent unsubscribe", () => {
+	const log: any[] = [];
+	const ps = createPubSub({ onError: () => {} }); // silent mode for tests
+
+	// Subscribe once with a callback that throws
+	ps.subscribeOnce("foo", (_data: any) => {
+		log.push("throwing");
+		throw new Error("Subscribe once error");
+	});
+
+	// Subscribe regular callback
+	ps.subscribe("foo", (data: any) => {
+		log.push(data);
+	});
+
+	// First publish - subscribeOnce throws but should still auto-unsubscribe
+	ps.publish("foo", "first");
+
+	assertEquals(log, ["throwing", "first"]);
+
+	// Second publish - subscribeOnce should not execute again
+	ps.publish("foo", "second");
+
+	assertEquals(log, ["throwing", "first", "second"]);
+});
+
+Deno.test("custom error handler works", () => {
+	const errors: Array<{ error: Error; topic: string; isWildcard: boolean }> = [];
+	const ps = createPubSub({
+		onError: (error, topic, isWildcard) => {
+			errors.push({ error, topic, isWildcard });
+		},
+	});
+
+	// Subscribe callback that throws
+	ps.subscribe("foo", (_data: any) => {
+		throw new Error("Regular error");
+	});
+
+	// Subscribe wildcard that throws
+	ps.subscribe("*", (_envelope: any) => {
+		throw new Error("Wildcard error");
+	});
+
+	ps.publish("foo", "bar");
+
+	// Should have captured both errors
+	assertEquals(errors.length, 2);
+	assertEquals(errors[0].topic, "foo");
+	assertEquals(errors[0].isWildcard, false);
+	assertEquals(errors[0].error.message, "Regular error");
+	assertEquals(errors[1].topic, "foo");
+	assertEquals(errors[1].isWildcard, true);
+	assertEquals(errors[1].error.message, "Wildcard error");
+});

@@ -97,6 +97,69 @@ pubsub.isSubscribed('bar', callback); // true (because of wildcard)
 pubsub.isSubscribed('bar', callback, false); // false (excluding wildcard)
 ```
 
+### Custom Error Handling
+
+By default, errors thrown by subscribers are logged to `console.error`. You can customize this behavior with the `onError` option:
+
+```js
+// Silent mode - suppress error logging
+const pubsub = createPubSub({
+  onError: () => {}
+});
+
+// Custom error handler - send to logging service
+const pubsub = createPubSub({
+  onError: (error, topic, isWildcard) => {
+    myLogger.error('Subscriber error', {
+      error,
+      topic,
+      isWildcard,
+      timestamp: Date.now()
+    });
+  }
+});
+
+// Subscribe to a topic
+pubsub.subscribe('user:action', (data) => {
+  // If this throws, it will be handled by your custom onError
+  processUserAction(data);
+});
+```
+
+The `onError` callback receives three parameters:
+- `error: Error` - The error that was thrown
+- `topic: string` - The topic that was being published to
+- `isWildcard: boolean` - Whether the error came from a wildcard subscriber
+
+## API Reference
+
+### `createPubSub(options?: PubSubOptions): PubSub`
+
+Factory function that creates a new PubSub instance.
+
+**Options:**
+- `onError?: (error: Error, topic: string, isWildcard: boolean) => void` - Custom error handler for subscriber errors. Defaults to `console.error`. Set to `() => {}` for silent mode.
+
+### `new PubSub(options?: PubSubOptions)`
+
+Constructor for creating a PubSub instance. Accepts the same options as `createPubSub()`.
+
+## TypeScript
+
+The library includes full TypeScript support:
+
+```typescript
+import { PubSub, PubSubOptions, Subscriber, Unsubscriber } from '@marianmeres/pubsub';
+
+const options: PubSubOptions = {
+  onError: (error, topic, isWildcard) => {
+    console.log(`Error in ${isWildcard ? 'wildcard' : 'regular'} subscriber for ${topic}`);
+  }
+};
+
+const pubsub = new PubSub(options);
+```
+
 ## Important Notes
 
 - Subscribers are executed **synchronously** in the order they were added
