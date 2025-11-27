@@ -14,13 +14,25 @@ export class PubSub {
 
 	/** Publish an event with optional data to all subscribers of a topic */
 	publish(topic: string, data?: any): boolean {
-		this.#subs.get(topic)?.forEach((cb) => cb(data));
+		this.#subs.get(topic)?.forEach((cb) => {
+			try {
+				cb(data);
+			} catch (error) {
+				console.error(`Error in subscriber for topic "${topic}":`, error);
+			}
+		});
 
 		// wildcard special case
 		if (topic !== "*") {
 			// we need to create an envelope here to know what the source event/topic was
 			// (using word "event" instead of "topic" here, feels more correct and expected)
-			this.#subs.get("*")?.forEach((cb) => cb({ event: topic, data }));
+			this.#subs.get("*")?.forEach((cb) => {
+				try {
+					cb({ event: topic, data });
+				} catch (error) {
+					console.error(`Error in wildcard subscriber for topic "${topic}":`, error);
+				}
+			});
 		}
 
 		return this.#subs.has(topic);
