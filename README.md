@@ -1,5 +1,8 @@
 # @marianmeres/pubsub
 
+[![NPM version](https://img.shields.io/npm/v/@marianmeres/pubsub)](https://www.npmjs.com/package/@marianmeres/pubsub)
+[![JSR version](https://jsr.io/badges/@marianmeres/pubsub)](https://jsr.io/@marianmeres/pubsub)
+
 Lightweight, type-safe publish-subscribe implementation with zero dependencies.
 
 ## Features
