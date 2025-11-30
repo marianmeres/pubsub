@@ -167,6 +167,10 @@ const pubsub = new PubSub(options);
 - Empty topics are automatically cleaned up after all subscribers are removed
 - Publishing to `"*"` will only trigger wildcard subscribers, not specific topic subscribers
 
-## License
 
-MIT
+## Package Identity
+
+- **Name:** @marianmeres/pubsub
+- **Author:** Marian Meres
+- **Repository:** https://github.com/marianmeres/pubsub
+- **License:** MIT
