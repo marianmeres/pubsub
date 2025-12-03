@@ -26,7 +26,7 @@ npm install @marianmeres/pubsub
 ## Basic Usage
 
 ```js
-import { createPubSub } from '@marianmores/pubsub';
+import { createPubSub } from '@marianmeres/pubsub';
 
 const { publish, subscribe, subscribeOnce, unsubscribe, unsubscribeAll } = createPubSub();
 
@@ -136,16 +136,18 @@ The `onError` callback receives three parameters:
 
 ## API Reference
 
-### `createPubSub(options?: PubSubOptions): PubSub`
+For complete API documentation, see [API.md](API.md).
 
-Factory function that creates a new PubSub instance.
+### Quick Reference
 
-**Options:**
-- `onError?: (error: Error, topic: string, isWildcard: boolean) => void` - Custom error handler for subscriber errors. Defaults to `console.error`. Set to `() => {}` for silent mode.
-
-### `new PubSub(options?: PubSubOptions)`
-
-Constructor for creating a PubSub instance. Accepts the same options as `createPubSub()`.
+- **`createPubSub(options?)`** - Factory function to create a new PubSub instance
+- **`new PubSub(options?)`** - Constructor for creating a PubSub instance
+- **`publish(topic, data?)`** - Publish data to subscribers
+- **`subscribe(topic, callback)`** - Subscribe to a topic (returns unsubscribe function)
+- **`subscribeOnce(topic, callback)`** - Subscribe for first event only
+- **`unsubscribe(topic, callback?)`** - Unsubscribe from a topic
+- **`unsubscribeAll(topic?)`** - Unsubscribe all from a topic or all topics
+- **`isSubscribed(topic, callback, considerWildcard?)`** - Check subscription status
 
 ## TypeScript
 
