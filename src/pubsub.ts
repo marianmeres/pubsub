@@ -1,65 +1,122 @@
+// Polyfill Symbol.dispose for runtimes that lack ES2024 explicit resource management.
+if (typeof (Symbol as any).dispose === "undefined") {
+	(Symbol as any).dispose = Symbol.for("Symbol.dispose");
+}
+
+/**
+ * Default event map. When no generic is supplied to {@link PubSub},
+ * any topic may carry any data — preserving the loose, dynamic shape.
+ */
+export type DefaultEventMap = Record<string, any>;
+
 /**
  * Callback function that receives published data.
+ *
  * For regular subscriptions, receives the published data directly.
- * For wildcard ("*") subscriptions, receives an envelope with `event` and `data` properties.
- * @param detail - The published data (or envelope for wildcard subscriptions)
+ * For wildcard ("*") subscriptions, receives a {@link WildcardEnvelope}.
+ *
+ * The return value is ignored. If the callback returns a Promise (i.e. it is
+ * `async`), rejections are routed to the configured error handler just like
+ * synchronous throws.
  */
-export type Subscriber = (detail: any) => void;
+export type Subscriber<TData = any> = (detail: TData) => unknown;
 
 /**
  * Function returned by subscribe methods to remove the subscription.
- * Can be called multiple times safely (subsequent calls are no-ops).
- * @returns void, or boolean indicating if unsubscription was successful
+ *
+ * - Idempotent: calling more than once is a safe no-op.
+ * - Implements `Symbol.dispose`, so it can be used with the `using` statement.
  */
-export type Unsubscriber = () => void | boolean;
+export interface Unsubscriber {
+	(): void;
+	[Symbol.dispose](): void;
+}
+
+/**
+ * Envelope delivered to wildcard ("*") subscribers.
+ */
+export interface WildcardEnvelope<
+	TEvents extends Record<string, any> = DefaultEventMap,
+> {
+	event: keyof TEvents & string;
+	data: TEvents[keyof TEvents];
+}
 
 /**
  * Custom error handler for subscriber errors.
- * Called when a subscriber throws an error during publish.
- * @param error - The error that was thrown by the subscriber
- * @param topic - The topic that was being published to
- * @param isWildcard - True if the error came from a wildcard ("*") subscriber
+ *
+ * @param error - The error thrown (or the rejection reason from an async subscriber)
+ * @param topic - The topic being published
+ * @param isWildcard - true if the failing subscriber was attached to "*"
  */
-export type ErrorHandler = (error: Error, topic: string, isWildcard: boolean) => void;
+export type ErrorHandler = (
+	error: Error,
+	topic: string,
+	isWildcard: boolean,
+) => void;
 
 /**
- * Configuration options for PubSub instance.
+ * Configuration options for a {@link PubSub} instance.
  */
 export interface PubSubOptions {
 	/**
-	 * Custom error handler for subscriber errors.
-	 * By default, errors are logged to console.error.
-	 * Set to `() => {}` for silent mode (errors are caught but not logged).
-	 * @default console.error
+	 * Custom handler for subscriber errors (sync throws and async rejections).
+	 * Defaults to logging via `console.error`. Pass `() => {}` for silent mode.
 	 */
 	onError?: ErrorHandler;
 }
 
 /**
- * A lightweight, type-safe publish-subscribe implementation.
+ * Reserved topic name used for wildcard subscriptions.
+ */
+const WILDCARD = "*";
+
+/**
+ * Lightweight, type-safe publish-subscribe.
  *
- * Supports topic-based subscriptions with wildcard ("*") support for listening to all events.
- * Subscriber errors are caught and handled without breaking other subscribers.
- * Empty topics are automatically cleaned up when all subscribers are removed.
+ * - Synchronous, ordered delivery to subscribers (in registration order).
+ * - Errors from any subscriber are caught and routed to the error handler;
+ *   other subscribers continue to run.
+ * - The subscriber list is snapshotted before delivery, so subscribing or
+ *   unsubscribing inside a callback never affects the in-flight publish.
+ * - Empty topics are removed automatically when their last subscriber unsubscribes.
+ * - Wildcard ("*") subscribers receive a {@link WildcardEnvelope}.
+ * - Methods are bound in the constructor, so destructuring is safe:
+ *   `const { publish, subscribe } = createPubSub();`
+ *
+ * Optional generic `TEvents` provides typed events:
+ * ```ts
+ * type Events = { 'user:login': { id: number }; 'tick': number };
+ * const ps = createPubSub<Events>();
+ * ps.publish('user:login', { id: 1 }); // typed
+ * ```
  *
  * @example
  * ```ts
- * const pubsub = new PubSub();
- * const unsub = pubsub.subscribe('user:login', (data) => console.log(data));
+ * const pubsub = createPubSub();
+ * using sub = pubsub.subscribe('user:login', (data) => console.log(data));
  * pubsub.publish('user:login', { userId: 123 });
- * unsub();
+ * // sub is auto-disposed at the end of the enclosing block
  * ```
  */
-export class PubSub {
+export class PubSub<TEvents extends Record<string, any> = DefaultEventMap> {
 	#subs = new Map<string, Set<Subscriber>>();
 	#onError: ErrorHandler;
 
-	/**
-	 * Creates a new PubSub instance.
-	 * @param options - Optional configuration options
-	 */
 	constructor(options?: PubSubOptions) {
 		this.#onError = options?.onError ?? this.#defaultErrorHandler;
+
+		// Bind public methods so destructuring is safe.
+		this.publish = this.publish.bind(this);
+		this.subscribe = this.subscribe.bind(this);
+		this.subscribeOnce = this.subscribeOnce.bind(this);
+		this.subscribeMany = this.subscribeMany.bind(this);
+		this.unsubscribe = this.unsubscribe.bind(this);
+		this.unsubscribeAll = this.unsubscribeAll.bind(this);
+		this.isSubscribed = this.isSubscribed.bind(this);
+		this.subscriberCount = this.subscriberCount.bind(this);
+		this.hasSubscribers = this.hasSubscribers.bind(this);
+		this.topics = this.topics.bind(this);
 	}
 
 	#defaultErrorHandler(error: Error, topic: string, isWildcard: boolean): void {
@@ -67,242 +124,235 @@ export class PubSub {
 		console.error(`Error in ${prefix} for topic "${topic}":`, error);
 	}
 
+	#invoke(cb: Subscriber, data: any, topic: string, isWildcard: boolean): void {
+		try {
+			const result = cb(data);
+			if (result && typeof (result as Promise<void>).then === "function") {
+				(result as Promise<void>).catch((reason) => {
+					const err = reason instanceof Error
+						? reason
+						: new Error(String(reason));
+					this.#onError(err, topic, isWildcard);
+				});
+			}
+		} catch (error) {
+			this.#onError(error as Error, topic, isWildcard);
+		}
+	}
+
+	#makeUnsubscriber(fn: () => void): Unsubscriber {
+		const u = (() => fn()) as Unsubscriber;
+		(u as any)[Symbol.dispose] = fn;
+		return u;
+	}
+
 	/**
-	 * Publishes data to all subscribers of a topic.
+	 * Publishes data to all subscribers of `topic`, plus any wildcard ("*")
+	 * subscribers (which receive a {@link WildcardEnvelope}).
 	 *
-	 * Subscribers are called synchronously in the order they were added.
-	 * If a subscriber throws an error, it is caught and passed to the error handler,
-	 * and remaining subscribers continue to execute.
-	 *
-	 * Wildcard ("*") subscribers also receive the data wrapped in an envelope:
-	 * `{ event: string, data: any }`.
-	 *
-	 * @param topic - The topic/event name to publish to
-	 * @param data - Optional data to pass to subscribers
-	 * @returns `true` if the topic has direct subscribers, `false` otherwise
-	 *
-	 * @example
-	 * ```ts
-	 * pubsub.publish('user:login', { userId: 123 });
-	 * pubsub.publish('notification'); // data is optional
-	 * ```
+	 * @returns true if `topic` had any direct subscribers, false otherwise.
+	 *          (Wildcard subscribers do not affect this return value.)
+	 * @throws if `topic === "*"` — the wildcard is reserved for subscribers.
 	 */
+	publish<K extends keyof TEvents & string>(topic: K, data: TEvents[K]): boolean;
+	publish(topic: string, data?: any): boolean;
 	publish(topic: string, data?: any): boolean {
-		this.#subs.get(topic)?.forEach((cb) => {
-			try {
-				cb(data);
-			} catch (error) {
-				this.#onError(error as Error, topic, false);
-			}
-		});
-
-		// wildcard special case
-		if (topic !== "*") {
-			// we need to create an envelope here to know what the source event/topic was
-			// (using word "event" instead of "topic" here, feels more correct and expected)
-			this.#subs.get("*")?.forEach((cb) => {
-				try {
-					cb({ event: topic, data });
-				} catch (error) {
-					this.#onError(error as Error, topic, true);
-				}
-			});
+		if (topic === WILDCARD) {
+			throw new Error(
+				`Cannot publish to wildcard topic "*". "*" is reserved for subscribers; publish to a real topic name instead.`,
+			);
 		}
 
-		return this.#subs.has(topic);
+		// Snapshot before iteration: subscribe/unsubscribe inside a callback
+		// must not affect the in-flight publish.
+		const direct = this.#subs.get(topic);
+		const hadDirect = !!direct && direct.size > 0;
+		if (direct) {
+			for (const cb of [...direct]) {
+				this.#invoke(cb, data, topic, false);
+			}
+		}
+
+		const wildcards = this.#subs.get(WILDCARD);
+		if (wildcards && wildcards.size > 0) {
+			const envelope: WildcardEnvelope<TEvents> = {
+				event: topic as keyof TEvents & string,
+				data,
+			};
+			for (const cb of [...wildcards]) {
+				this.#invoke(cb, envelope, topic, true);
+			}
+		}
+
+		return hadDirect;
 	}
 
 	/**
-	 * Subscribes a callback to a topic.
+	 * Subscribes a callback to a topic. Use `"*"` to receive every published event
+	 * as a {@link WildcardEnvelope}.
 	 *
-	 * Use the special topic `"*"` to subscribe to all events (wildcard subscription).
-	 * Wildcard subscribers receive an envelope: `{ event: string, data: any }`.
-	 *
-	 * @param topic - The topic/event name to subscribe to, or "*" for all events
-	 * @param cb - The callback function to invoke when the topic is published
-	 * @returns An unsubscribe function that removes this subscription when called
-	 *
-	 * @example
-	 * ```ts
-	 * // Regular subscription
-	 * const unsub = pubsub.subscribe('foo', (data) => console.log(data));
-	 *
-	 * // Wildcard subscription
-	 * pubsub.subscribe('*', ({ event, data }) => console.log(event, data));
-	 *
-	 * // Unsubscribe
-	 * unsub();
-	 * ```
+	 * @returns An idempotent unsubscriber. Implements `Symbol.dispose` for `using`.
 	 */
+	subscribe<K extends keyof TEvents & string>(
+		topic: K,
+		cb: Subscriber<TEvents[K]>,
+	): Unsubscriber;
+	subscribe(
+		topic: "*",
+		cb: Subscriber<WildcardEnvelope<TEvents>>,
+	): Unsubscriber;
+	subscribe(topic: string, cb: Subscriber): Unsubscriber;
 	subscribe(topic: string, cb: Subscriber): Unsubscriber {
-		if (!this.#subs.has(topic)) {
-			this.#subs.set(topic, new Set<Subscriber>());
+		let bucket = this.#subs.get(topic);
+		if (!bucket) {
+			bucket = new Set<Subscriber>();
+			this.#subs.set(topic, bucket);
 		}
+		bucket.add(cb);
 
-		this.#subs.get(topic)!.add(cb);
-
-		return () => this.unsubscribe(topic, cb);
+		return this.#makeUnsubscriber(() => {
+			this.unsubscribe(topic, cb);
+		});
 	}
 
 	/**
-	 * Unsubscribes a specific callback from a topic.
+	 * Subscribes for exactly one delivery, then auto-unsubscribes.
 	 *
-	 * If no callback is provided, all subscribers for the topic are removed.
-	 * Empty topics are automatically cleaned up after the last subscriber is removed.
-	 *
-	 * @param topic - The topic to unsubscribe from
-	 * @param cb - Optional specific callback to remove. If omitted, all subscribers are removed.
-	 * @returns `true` if the callback was found and removed, `false` otherwise
-	 *
-	 * @example
-	 * ```ts
-	 * // Unsubscribe specific callback
-	 * pubsub.unsubscribe('foo', myCallback);
-	 *
-	 * // Unsubscribe all from topic
-	 * pubsub.unsubscribe('foo');
-	 * ```
+	 * The unsubscribe happens *before* the user callback runs, so re-entrant
+	 * publishes from within the callback can never re-trigger this subscription.
+	 * Errors from the callback are routed to the error handler as usual.
 	 */
-	unsubscribe(topic: string, cb?: Subscriber): boolean {
-		if (!this.#subs.has(topic)) return false;
-
-		const subscribers = this.#subs.get(topic);
-		let removed = true;
-
-		if (typeof cb === "function") {
-			removed = subscribers!.delete(cb);
-			// Clean up empty topics
-			if (subscribers?.size === 0) {
-				this.#subs.delete(topic);
-			}
-		} else {
-			this.#subs.delete(topic);
-		}
-
-		return removed;
-	}
-
-	/**
-	 * Subscribes to a topic for only the first published event.
-	 *
-	 * The subscription is automatically removed after the callback is invoked once.
-	 * The callback is unsubscribed even if it throws an error.
-	 *
-	 * @param topic - The topic/event name to subscribe to
-	 * @param cb - The callback function to invoke once
-	 * @returns An unsubscribe function that can be used to cancel before the event fires
-	 *
-	 * @example
-	 * ```ts
-	 * pubsub.subscribeOnce('init', (data) => {
-	 *   console.log('Initialized:', data);
-	 * });
-	 *
-	 * pubsub.publish('init', { ready: true }); // logs once
-	 * pubsub.publish('init', { ready: true }); // no effect
-	 * ```
-	 */
+	subscribeOnce<K extends keyof TEvents & string>(
+		topic: K,
+		cb: Subscriber<TEvents[K]>,
+	): Unsubscriber;
+	subscribeOnce(
+		topic: "*",
+		cb: Subscriber<WildcardEnvelope<TEvents>>,
+	): Unsubscriber;
+	subscribeOnce(topic: string, cb: Subscriber): Unsubscriber;
 	subscribeOnce(topic: string, cb: Subscriber): Unsubscriber {
-		const onceWrapper = (data: any) => {
-			try {
-				cb(data);
-			} finally {
-				// Always unsubscribe, even if the callback throws
-				this.unsubscribe(topic, onceWrapper);
-			}
+		let fired = false;
+		const onceWrapper: Subscriber = (data: any) => {
+			if (fired) return;
+			fired = true;
+			// Unsubscribe BEFORE invoking — guards against re-entrant publishes.
+			this.unsubscribe(topic, onceWrapper);
+			return cb(data);
 		};
 		return this.subscribe(topic, onceWrapper);
 	}
 
 	/**
-	 * Unsubscribes all callbacks from a specific topic, or from all topics.
-	 *
-	 * @param topic - Optional topic to clear. If omitted, all topics are cleared.
-	 * @returns `true` if any subscriptions were removed, `false` if the topic didn't exist
-	 *
-	 * @example
-	 * ```ts
-	 * // Clear all subscribers from a specific topic
-	 * pubsub.unsubscribeAll('foo');
-	 *
-	 * // Clear all subscribers from all topics
-	 * pubsub.unsubscribeAll();
-	 * ```
+	 * Subscribes a single callback to multiple topics at once.
+	 * The returned unsubscriber removes all of them.
 	 */
-	unsubscribeAll(topic?: string): boolean {
-		// If topic is provided, clear only that topic
-		if (topic) {
-			if (!this.#subs.has(topic)) {
-				return false;
-			}
-			this.#subs.delete(topic);
-			return true;
+	subscribeMany<K extends keyof TEvents & string>(
+		topics: K[],
+		cb: Subscriber<TEvents[K]>,
+	): Unsubscriber;
+	subscribeMany(topics: string[], cb: Subscriber): Unsubscriber;
+	subscribeMany(topics: string[], cb: Subscriber): Unsubscriber {
+		const unsubs = topics.map((t) => this.subscribe(t, cb));
+		return this.#makeUnsubscriber(() => {
+			for (const u of unsubs) u();
+		});
+	}
+
+	/**
+	 * Removes a specific callback from a topic, or — if `cb` is omitted —
+	 * removes every subscriber from the topic. Empty topics are cleaned up.
+	 *
+	 * @returns true if anything was removed.
+	 */
+	unsubscribe(topic: string, cb?: Subscriber): boolean {
+		const bucket = this.#subs.get(topic);
+		if (!bucket) return false;
+
+		if (typeof cb === "function") {
+			const removed = bucket.delete(cb);
+			if (bucket.size === 0) this.#subs.delete(topic);
+			return removed;
 		}
 
-		// Otherwise, clear all topics
+		return this.#subs.delete(topic);
+	}
+
+	/**
+	 * Removes every subscriber for `topic`, or — if `topic` is omitted —
+	 * every subscriber from every topic.
+	 *
+	 * @returns true if anything was removed.
+	 */
+	unsubscribeAll(topic?: string): boolean {
+		if (topic !== undefined) return this.#subs.delete(topic);
+		if (this.#subs.size === 0) return false;
 		this.#subs.clear();
 		return true;
 	}
 
 	/**
-	 * Checks if a callback is subscribed to a topic.
-	 *
-	 * By default, also considers wildcard ("*") subscriptions. A callback subscribed
-	 * to "*" is considered subscribed to all topics.
-	 *
-	 * @param topic - The topic to check
-	 * @param cb - The callback to look for
-	 * @param considerWildcard - Whether to include wildcard subscriptions in the check (default: true)
-	 * @returns `true` if the callback is subscribed to the topic, `false` otherwise
-	 *
-	 * @example
-	 * ```ts
-	 * pubsub.subscribe('*', myCallback);
-	 * pubsub.isSubscribed('foo', myCallback);        // true (via wildcard)
-	 * pubsub.isSubscribed('foo', myCallback, false); // false (excluding wildcard)
-	 * ```
+	 * Checks whether `cb` is subscribed to `topic`. By default also reports true
+	 * if `cb` is subscribed to the wildcard ("*"). Pass `considerWildcard: false`
+	 * to require an exact, direct subscription.
 	 */
 	isSubscribed(
 		topic: string,
 		cb: Subscriber,
-		considerWildcard = true
+		considerWildcard = true,
 	): boolean {
-		let has = !!this.#subs.get(topic)?.has(cb);
-		if (considerWildcard) {
-			has ||= !!this.#subs.get("*")?.has(cb);
-		}
-		return has;
+		if (this.#subs.get(topic)?.has(cb)) return true;
+		if (considerWildcard && this.#subs.get(WILDCARD)?.has(cb)) return true;
+		return false;
 	}
 
 	/**
-	 * Returns a snapshot of all current subscriptions for debugging purposes.
+	 * Returns the subscriber count for `topic`, or — if `topic` is omitted —
+	 * the total count across all topics (including wildcard).
+	 */
+	subscriberCount(topic?: string): number {
+		if (topic !== undefined) return this.#subs.get(topic)?.size ?? 0;
+		let total = 0;
+		for (const set of this.#subs.values()) total += set.size;
+		return total;
+	}
+
+	/**
+	 * Returns true if `topic` has at least one direct subscriber.
+	 * (Does not consider wildcard subscribers.)
+	 */
+	hasSubscribers(topic: string): boolean {
+		return (this.#subs.get(topic)?.size ?? 0) > 0;
+	}
+
+	/**
+	 * Lists topics that currently have at least one subscriber. Includes "*"
+	 * if there are wildcard subscribers.
+	 */
+	topics(): string[] {
+		return [...this.#subs.keys()];
+	}
+
+	/**
+	 * Returns a defensive snapshot of internal subscriptions for debugging.
+	 * Mutating the returned object does not affect the instance.
 	 *
-	 * @returns An object mapping topic names to their subscriber sets
-	 * @internal This method is intended for debugging and testing only
+	 * @internal Intended for debugging and tests only.
 	 */
 	__dump(): Record<string, Set<Subscriber>> {
-		return Object.fromEntries(this.#subs.entries());
+		const out: Record<string, Set<Subscriber>> = {};
+		for (const [topic, set] of this.#subs.entries()) {
+			out[topic] = new Set(set);
+		}
+		return out;
 	}
 }
 
 /**
- * Factory function to create a new PubSub instance.
- *
- * This is a convenience function equivalent to `new PubSub(options)`.
- *
- * @param options - Optional configuration options
- * @returns A new PubSub instance
- *
- * @example
- * ```ts
- * const pubsub = createPubSub();
- *
- * // With custom error handling
- * const pubsub = createPubSub({
- *   onError: (error, topic) => myLogger.error(error, { topic })
- * });
- * ```
+ * Convenience factory equivalent to `new PubSub<TEvents>(options)`.
  */
-export function createPubSub(options?: PubSubOptions): PubSub {
-	return new PubSub(options);
+export function createPubSub<
+	TEvents extends Record<string, any> = DefaultEventMap,
+>(options?: PubSubOptions): PubSub<TEvents> {
+	return new PubSub<TEvents>(options);
 }

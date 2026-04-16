@@ -1,1 +1,2 @@
-Lightweight, zero-dependency publish-subscribe (pub/sub) library with wildcard topic support, one-time subscriptions, and automatic cleanup.
+Lightweight, zero-dependency publish-subscribe (pub/sub) library with wildcard topic support, 
+one-time subscriptions, and automatic cleanup.

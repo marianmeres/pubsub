@@ -129,8 +129,9 @@ Deno.test("wildcard", () => {
 	let log: any[] = [];
 	const ps = createPubSub();
 
-	const unsub = ps.subscribe("*", (data: any) =>
-		log.push(data.event + ":" + data.data)
+	const unsub = ps.subscribe(
+		"*",
+		(data: any) => log.push(data.event + ":" + data.data),
 	);
 	ps.subscribe("foo", (data: any) => log.push(data));
 
@@ -292,4 +293,253 @@ Deno.test("custom error handler works", () => {
 	assertEquals(errors[1].topic, "foo");
 	assertEquals(errors[1].isWildcard, true);
 	assertEquals(errors[1].error.message, "Wildcard error");
+});
+
+Deno.test("destructured methods work (bound in constructor)", () => {
+	const log: any[] = [];
+	const { publish, subscribe, unsubscribe, unsubscribeAll } = createPubSub();
+
+	const unsub = subscribe("foo", (data) => log.push(data));
+	publish("foo", "bar");
+	assertEquals(log, ["bar"]);
+
+	unsub();
+	publish("foo", "baz");
+	assertEquals(log, ["bar"]);
+
+	subscribe("a", (d) => log.push("a:" + d));
+	subscribe("b", (d) => log.push("b:" + d));
+	unsubscribe("a");
+	publish("a", 1);
+	publish("b", 2);
+	assertEquals(log, ["bar", "b:2"]);
+
+	unsubscribeAll();
+});
+
+Deno.test("subscribeOnce fires only once under re-entrant publish", () => {
+	const log: any[] = [];
+	const ps = createPubSub();
+
+	ps.subscribeOnce("foo", (data: any) => {
+		log.push(data);
+		// Re-publish to the same topic from inside the once callback.
+		// The wrapper must already be unsubscribed so this does not re-fire.
+		if (data === 1) ps.publish("foo", 2);
+	});
+
+	ps.publish("foo", 1);
+	assertEquals(log, [1]);
+});
+
+Deno.test("subscribing during publish does not fire in the same publish", () => {
+	const log: any[] = [];
+	const ps = createPubSub();
+
+	ps.subscribe("foo", (data: any) => {
+		log.push("first:" + data);
+		// Add a new subscriber mid-publish — must NOT fire for this publish.
+		ps.subscribe("foo", (d: any) => log.push("late:" + d));
+	});
+
+	ps.publish("foo", 1);
+	assertEquals(log, ["first:1"]);
+
+	ps.publish("foo", 2);
+	// Now both fire. Note: the `first` subscriber adds yet another `late`
+	// subscriber on every publish — that one also won't fire this turn.
+	assertEquals(log, ["first:1", "first:2", "late:2"]);
+});
+
+Deno.test("unsubscribing a sibling during publish does not suppress them in the current publish", () => {
+	const log: any[] = [];
+	const ps = createPubSub();
+
+	const sibling = (data: any) => log.push("sibling:" + data);
+	ps.subscribe("foo", (data: any) => {
+		log.push("first:" + data);
+		// Unsubscribe sibling mid-publish. It was snapshotted, so it still fires.
+		ps.unsubscribe("foo", sibling);
+	});
+	ps.subscribe("foo", sibling);
+
+	ps.publish("foo", 1);
+	assertEquals(log, ["first:1", "sibling:1"]);
+
+	// On the next publish, sibling is gone.
+	ps.publish("foo", 2);
+	assertEquals(log, ["first:1", "sibling:1", "first:2"]);
+});
+
+Deno.test("async subscriber rejection routes to onError", async () => {
+	const errors: Array<{ topic: string; isWildcard: boolean; msg: string }> = [];
+	const ps = createPubSub({
+		onError: (error, topic, isWildcard) => {
+			errors.push({ topic, isWildcard, msg: error.message });
+		},
+	});
+
+	ps.subscribe("foo", async (_data: any) => {
+		throw new Error("async boom");
+	});
+
+	ps.subscribe("*", async (_env: any) => {
+		throw new Error("wildcard async boom");
+	});
+
+	ps.publish("foo", "bar");
+
+	// Wait one microtask flush so the rejected promises propagate.
+	await Promise.resolve();
+	await Promise.resolve();
+
+	assertEquals(errors.length, 2);
+	assertEquals(errors[0], { topic: "foo", isWildcard: false, msg: "async boom" });
+	assertEquals(errors[1], {
+		topic: "foo",
+		isWildcard: true,
+		msg: "wildcard async boom",
+	});
+});
+
+Deno.test("__dump returns a defensive copy", () => {
+	const ps = createPubSub();
+	const cb = (_d: any) => {};
+	ps.subscribe("foo", cb);
+
+	const dumped = ps.__dump();
+	dumped.foo.clear(); // mutating the snapshot must not affect the instance
+	dumped.bogus = new Set([cb]);
+
+	assert(ps.isSubscribed("foo", cb));
+	assert(!ps.isSubscribed("bogus", cb, false));
+});
+
+Deno.test("same callback subscribed twice is deduped", () => {
+	const log: any[] = [];
+	const ps = createPubSub();
+	const cb = (d: any) => log.push(d);
+
+	ps.subscribe("foo", cb);
+	ps.subscribe("foo", cb);
+	ps.subscribe("foo", cb);
+
+	ps.publish("foo", "x");
+	assertEquals(log, ["x"]);
+	assertEquals(ps.subscriberCount("foo"), 1);
+});
+
+Deno.test("publish to wildcard topic throws", () => {
+	const ps = createPubSub();
+	let threw = false;
+	try {
+		ps.publish("*", "anything");
+	} catch (e) {
+		threw = true;
+		assert(e instanceof Error);
+		assert(e.message.includes('"*"'));
+	}
+	assert(threw, 'expected publish("*", ...) to throw');
+});
+
+Deno.test("unsubscribeAll() returns false when nothing was removed", () => {
+	const ps = createPubSub();
+	assertEquals(ps.unsubscribeAll(), false);
+	assertEquals(ps.unsubscribeAll("nope"), false);
+
+	ps.subscribe("foo", () => {});
+	assertEquals(ps.unsubscribeAll("foo"), true);
+	assertEquals(ps.unsubscribeAll("foo"), false);
+
+	ps.subscribe("a", () => {});
+	ps.subscribe("b", () => {});
+	assertEquals(ps.unsubscribeAll(), true);
+	assertEquals(ps.unsubscribeAll(), false);
+});
+
+Deno.test("subscriberCount, hasSubscribers, topics", () => {
+	const ps = createPubSub();
+	assertEquals(ps.subscriberCount(), 0);
+	assertEquals(ps.subscriberCount("foo"), 0);
+	assertEquals(ps.hasSubscribers("foo"), false);
+	assertEquals(ps.topics(), []);
+
+	const a = ps.subscribe("foo", () => {});
+	ps.subscribe("foo", () => {});
+	ps.subscribe("bar", () => {});
+	ps.subscribe("*", () => {});
+
+	assertEquals(ps.subscriberCount(), 4);
+	assertEquals(ps.subscriberCount("foo"), 2);
+	assertEquals(ps.subscriberCount("bar"), 1);
+	assertEquals(ps.subscriberCount("*"), 1);
+	assertEquals(ps.subscriberCount("missing"), 0);
+	assertEquals(ps.hasSubscribers("foo"), true);
+	assertEquals(ps.hasSubscribers("missing"), false);
+	assertEquals(ps.topics().sort(), ["*", "bar", "foo"]);
+
+	a();
+	assertEquals(ps.subscriberCount("foo"), 1);
+});
+
+Deno.test("subscribeMany subscribes to multiple topics", () => {
+	const log: any[] = [];
+	const ps = createPubSub();
+
+	const unsub = ps.subscribeMany(["a", "b", "c"], (data: any) => log.push(data));
+
+	ps.publish("a", 1);
+	ps.publish("b", 2);
+	ps.publish("c", 3);
+	ps.publish("d", 4); // not subscribed
+	assertEquals(log, [1, 2, 3]);
+
+	unsub();
+	ps.publish("a", 5);
+	ps.publish("b", 6);
+	assertEquals(log, [1, 2, 3]);
+});
+
+Deno.test("Unsubscriber supports Symbol.dispose / using statement", () => {
+	const log: any[] = [];
+	const ps = createPubSub();
+
+	{
+		using _sub = ps.subscribe("foo", (d: any) => log.push(d));
+		ps.publish("foo", 1);
+		assertEquals(log, [1]);
+		assertEquals(ps.subscriberCount("foo"), 1);
+	}
+
+	// After the using-block, subscription must be disposed.
+	assertEquals(ps.subscriberCount("foo"), 0);
+	ps.publish("foo", 2);
+	assertEquals(log, [1]);
+});
+
+Deno.test("typed events compile and run", () => {
+	type Events = {
+		"user:login": { id: number };
+		tick: number;
+	};
+	const log: any[] = [];
+	const ps = createPubSub<Events>();
+
+	ps.subscribe("user:login", (data) => {
+		// data is { id: number } at the type level
+		log.push(data.id);
+	});
+	ps.subscribe("tick", (n) => {
+		// n is number
+		log.push(n + 1);
+	});
+	ps.subscribe("*", (env) => {
+		// env is WildcardEnvelope<Events>
+		log.push(env.event);
+	});
+
+	ps.publish("user:login", { id: 42 });
+	ps.publish("tick", 10);
+
+	assertEquals(log, [42, "user:login", 11, "tick"]);
 });

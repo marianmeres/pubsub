@@ -14,52 +14,59 @@ Complete API documentation for `@marianmeres/pubsub`.
 
 ## Factory Function
 
-### `createPubSub(options?)`
+### `createPubSub<TEvents>(options?)`
 
-Creates a new PubSub instance. This is a convenience function equivalent to `new PubSub(options)`.
+Convenience factory equivalent to `new PubSub<TEvents>(options)`.
+
+**Type Parameters:**
+- `TEvents` (optional): `Record<string, any>` — event map for typed events. Defaults to `Record<string, any>` (untyped).
 
 **Parameters:**
-- `options` (optional): `PubSubOptions` - Configuration options
+- `options` (optional): [`PubSubOptions`](#pubsuboptions)
 
-**Returns:** `PubSub` - A new PubSub instance
+**Returns:** [`PubSub<TEvents>`](#pubsub-class)
 
 **Example:**
 ```ts
 import { createPubSub } from '@marianmeres/pubsub';
 
-const pubsub = createPubSub();
+const ps = createPubSub();
 
 // With custom error handling
-const pubsub = createPubSub({
-  onError: (error, topic) => myLogger.error(error, { topic })
+const ps2 = createPubSub({
+  onError: (error, topic) => myLogger.error(error, { topic }),
 });
+
+// Typed events
+type Events = { 'tick': number; 'msg': { body: string } };
+const ps3 = createPubSub<Events>();
 ```
 
 ---
 
 ## PubSub Class
 
-A lightweight, type-safe publish-subscribe implementation.
+A lightweight, type-safe publish-subscribe.
 
-Supports topic-based subscriptions with wildcard (`"*"`) support for listening to all events. Subscriber errors are caught and handled without breaking other subscribers. Empty topics are automatically cleaned up when all subscribers are removed.
+- Synchronous, ordered delivery (registration order).
+- Subscriber errors and async rejections are caught and routed to `onError`; other subscribers keep running.
+- The subscriber list is snapshotted before delivery — concurrent subscribe/unsubscribe inside a callback never affects the in-flight publish.
+- Empty topics are auto-cleaned.
+- Wildcard `"*"` subscribers receive a [`WildcardEnvelope`](#wildcardenvelope).
+- Methods are pre-bound; destructuring is safe.
 
 ### Constructor
 
 ```ts
-new PubSub(options?: PubSubOptions)
+new PubSub<TEvents extends Record<string, any> = Record<string, any>>(options?: PubSubOptions)
 ```
-
-**Parameters:**
-- `options` (optional): `PubSubOptions` - Configuration options
 
 **Example:**
 ```ts
 import { PubSub } from '@marianmeres/pubsub';
 
-const pubsub = new PubSub();
-
-// With silent error handling
-const pubsub = new PubSub({ onError: () => {} });
+const ps = new PubSub();
+const silent = new PubSub({ onError: () => {} });
 ```
 
 ---
@@ -68,138 +75,182 @@ const pubsub = new PubSub({ onError: () => {} });
 
 #### `publish(topic, data?)`
 
-Publishes data to all subscribers of a topic.
+Publishes data to all direct subscribers of `topic`, then to all wildcard (`"*"`) subscribers (which receive a [`WildcardEnvelope`](#wildcardenvelope)).
 
-Subscribers are called synchronously in the order they were added. If a subscriber throws an error, it is caught and passed to the error handler, and remaining subscribers continue to execute.
-
-Wildcard (`"*"`) subscribers also receive the data wrapped in an envelope: `{ event: string, data: any }`.
+Subscribers are called in registration order. Errors from any subscriber are caught and routed to `onError`; remaining subscribers still run. The subscriber list is snapshotted before iteration.
 
 **Parameters:**
-- `topic`: `string` - The topic/event name to publish to
-- `data` (optional): `any` - Data to pass to subscribers
+- `topic`: `string` (or `keyof TEvents` if generic) — must not be `"*"`
+- `data` (optional): the payload (typed by `TEvents[topic]` when generic)
 
-**Returns:** `boolean` - `true` if the topic has direct subscribers, `false` otherwise
+**Returns:** `boolean` — `true` if the topic had any direct subscribers; wildcard subscribers do not affect this value.
+
+**Throws:** if `topic === "*"`. The wildcard is reserved for subscribers.
 
 **Example:**
 ```ts
-pubsub.publish('user:login', { userId: 123 });
-pubsub.publish('notification'); // data is optional
+ps.publish('user:login', { userId: 123 });
+ps.publish('notification'); // data is optional in the untyped case
 ```
 
 ---
 
 #### `subscribe(topic, callback)`
 
-Subscribes a callback to a topic.
-
-Use the special topic `"*"` to subscribe to all events (wildcard subscription). Wildcard subscribers receive an envelope: `{ event: string, data: any }`.
+Subscribes a callback. Use `"*"` to receive every event as a [`WildcardEnvelope`](#wildcardenvelope).
 
 **Parameters:**
-- `topic`: `string` - The topic/event name to subscribe to, or `"*"` for all events
-- `callback`: `Subscriber` - The callback function to invoke when the topic is published
+- `topic`: `string` (or `keyof TEvents` / `"*"` if generic)
+- `callback`: [`Subscriber`](#subscriber)
 
-**Returns:** `Unsubscriber` - An unsubscribe function that removes this subscription when called
+**Returns:** [`Unsubscriber`](#unsubscriber) — idempotent function that also implements `Symbol.dispose`.
 
 **Example:**
 ```ts
-// Regular subscription
-const unsub = pubsub.subscribe('foo', (data) => console.log(data));
+const unsub = ps.subscribe('foo', (data) => console.log(data));
 
-// Wildcard subscription
-pubsub.subscribe('*', ({ event, data }) => console.log(event, data));
+// Wildcard
+ps.subscribe('*', ({ event, data }) => console.log(event, data));
 
-// Unsubscribe
-unsub();
+// Disposable / using
+{
+  using s = ps.subscribe('bar', handler);
+}
 ```
 
 ---
 
 #### `subscribeOnce(topic, callback)`
 
-Subscribes to a topic for only the first published event.
-
-The subscription is automatically removed after the callback is invoked once. The callback is unsubscribed even if it throws an error.
+Subscribes for exactly one delivery, then auto-unsubscribes. The unsubscribe runs **before** the callback, so re-entrant publishes from inside the callback never re-fire it. Errors are still routed to `onError`.
 
 **Parameters:**
-- `topic`: `string` - The topic/event name to subscribe to
-- `callback`: `Subscriber` - The callback function to invoke once
+- `topic`: `string` (or `keyof TEvents` / `"*"` if generic)
+- `callback`: [`Subscriber`](#subscriber)
 
-**Returns:** `Unsubscriber` - An unsubscribe function that can be used to cancel before the event fires
+**Returns:** [`Unsubscriber`](#unsubscriber) — can also be used to cancel before the event fires.
 
 **Example:**
 ```ts
-pubsub.subscribeOnce('init', (data) => {
+ps.subscribeOnce('init', (data) => {
   console.log('Initialized:', data);
 });
 
-pubsub.publish('init', { ready: true }); // logs once
-pubsub.publish('init', { ready: true }); // no effect
+ps.publish('init', { ready: true }); // logs once
+ps.publish('init', { ready: true }); // no-op
+```
+
+---
+
+#### `subscribeMany(topics, callback)`
+
+Subscribes a single callback to multiple topics. The returned unsubscriber removes them all.
+
+**Parameters:**
+- `topics`: `string[]` (or `(keyof TEvents)[]` if generic)
+- `callback`: [`Subscriber`](#subscriber)
+
+**Returns:** [`Unsubscriber`](#unsubscriber)
+
+**Example:**
+```ts
+const unsub = ps.subscribeMany(['user:login', 'user:logout'], (data) => {
+  console.log(data);
+});
+unsub(); // removes both
 ```
 
 ---
 
 #### `unsubscribe(topic, callback?)`
 
-Unsubscribes a specific callback from a topic.
-
-If no callback is provided, all subscribers for the topic are removed. Empty topics are automatically cleaned up after the last subscriber is removed.
+Removes a specific callback from a topic. If `callback` is omitted, removes every subscriber from the topic. Empty topics are auto-cleaned.
 
 **Parameters:**
-- `topic`: `string` - The topic to unsubscribe from
-- `callback` (optional): `Subscriber` - Specific callback to remove. If omitted, all subscribers are removed.
+- `topic`: `string`
+- `callback` (optional): [`Subscriber`](#subscriber)
 
-**Returns:** `boolean` - `true` if the callback was found and removed, `false` otherwise
+**Returns:** `boolean` — `true` if anything was removed.
 
 **Example:**
 ```ts
-// Unsubscribe specific callback
-pubsub.unsubscribe('foo', myCallback);
-
-// Unsubscribe all from topic
-pubsub.unsubscribe('foo');
+ps.unsubscribe('foo', myCallback);
+ps.unsubscribe('foo'); // remove all from "foo"
 ```
 
 ---
 
 #### `unsubscribeAll(topic?)`
 
-Unsubscribes all callbacks from a specific topic, or from all topics.
+Removes every subscriber for `topic`, or — if `topic` is omitted — every subscriber from every topic.
 
 **Parameters:**
-- `topic` (optional): `string` - Topic to clear. If omitted, all topics are cleared.
+- `topic` (optional): `string`
 
-**Returns:** `boolean` - `true` if any subscriptions were removed, `false` if the topic didn't exist
+**Returns:** `boolean` — `true` if anything was removed, `false` otherwise (e.g. nothing was subscribed, or the topic doesn't exist).
 
 **Example:**
 ```ts
-// Clear all subscribers from a specific topic
-pubsub.unsubscribeAll('foo');
-
-// Clear all subscribers from all topics
-pubsub.unsubscribeAll();
+ps.unsubscribeAll('foo'); // clear "foo"
+ps.unsubscribeAll();      // clear everything
 ```
 
 ---
 
 #### `isSubscribed(topic, callback, considerWildcard?)`
 
-Checks if a callback is subscribed to a topic.
-
-By default, also considers wildcard (`"*"`) subscriptions. A callback subscribed to `"*"` is considered subscribed to all topics.
+Checks whether `callback` is subscribed to `topic`. By default, also reports `true` if `callback` is registered to the wildcard `"*"`.
 
 **Parameters:**
-- `topic`: `string` - The topic to check
-- `callback`: `Subscriber` - The callback to look for
-- `considerWildcard` (optional): `boolean` - Whether to include wildcard subscriptions in the check (default: `true`)
+- `topic`: `string`
+- `callback`: [`Subscriber`](#subscriber)
+- `considerWildcard` (optional): `boolean` — default `true`
 
-**Returns:** `boolean` - `true` if the callback is subscribed to the topic, `false` otherwise
+**Returns:** `boolean`
 
 **Example:**
 ```ts
-pubsub.subscribe('*', myCallback);
-pubsub.isSubscribed('foo', myCallback);        // true (via wildcard)
-pubsub.isSubscribed('foo', myCallback, false); // false (excluding wildcard)
+ps.subscribe('*', cb);
+ps.isSubscribed('foo', cb);        // true (via wildcard)
+ps.isSubscribed('foo', cb, false); // false (excluding wildcard)
 ```
+
+---
+
+#### `subscriberCount(topic?)`
+
+Returns the subscriber count for `topic`, or — if `topic` is omitted — the total across all topics (including `"*"`).
+
+**Parameters:**
+- `topic` (optional): `string`
+
+**Returns:** `number`
+
+**Example:**
+```ts
+ps.subscriberCount();        // total
+ps.subscriberCount('foo');   // count for "foo"
+ps.subscriberCount('*');     // wildcard count
+```
+
+---
+
+#### `hasSubscribers(topic)`
+
+Returns `true` if `topic` has at least one **direct** subscriber. Does not consider wildcards.
+
+**Parameters:**
+- `topic`: `string`
+
+**Returns:** `boolean`
+
+---
+
+#### `topics()`
+
+Returns the list of topics that currently have at least one subscriber. Includes `"*"` if there are wildcard subscribers.
+
+**Returns:** `string[]`
 
 ---
 
@@ -208,20 +259,36 @@ pubsub.isSubscribed('foo', myCallback, false); // false (excluding wildcard)
 ### `Subscriber`
 
 ```ts
-type Subscriber = (detail: any) => void;
+type Subscriber<TData = any> = (detail: TData) => unknown;
 ```
 
-Callback function that receives published data. For regular subscriptions, receives the published data directly. For wildcard (`"*"`) subscriptions, receives an envelope with `event` and `data` properties.
+Callback that receives published data. For `"*"` subscriptions, `TData` is a [`WildcardEnvelope`](#wildcardenvelope). The return value is ignored. If the callback returns a Promise (i.e. it is `async`), rejections are routed to `onError`.
 
 ---
 
 ### `Unsubscriber`
 
 ```ts
-type Unsubscriber = () => void | boolean;
+interface Unsubscriber {
+  (): void;
+  [Symbol.dispose](): void;
+}
 ```
 
-Function returned by subscribe methods to remove the subscription. Can be called multiple times safely (subsequent calls are no-ops).
+Function returned by `subscribe`, `subscribeOnce`, and `subscribeMany`. Idempotent — calling more than once is safe. Implements `Symbol.dispose` for use with the ES2024 `using` statement.
+
+---
+
+### `WildcardEnvelope`
+
+```ts
+interface WildcardEnvelope<TEvents extends Record<string, any> = Record<string, any>> {
+  event: keyof TEvents & string;
+  data: TEvents[keyof TEvents];
+}
+```
+
+Envelope delivered to wildcard (`"*"`) subscribers, identifying which event was published.
 
 ---
 
@@ -231,12 +298,9 @@ Function returned by subscribe methods to remove the subscription. Can be called
 type ErrorHandler = (error: Error, topic: string, isWildcard: boolean) => void;
 ```
 
-Custom error handler for subscriber errors. Called when a subscriber throws an error during publish.
-
-**Parameters:**
-- `error`: `Error` - The error that was thrown by the subscriber
-- `topic`: `string` - The topic that was being published to
-- `isWildcard`: `boolean` - `true` if the error came from a wildcard (`"*"`) subscriber
+- `error` — the thrown error or rejection reason from an async subscriber
+- `topic` — the topic being published
+- `isWildcard` — `true` if the failing subscriber was attached to `"*"`
 
 ---
 
@@ -248,7 +312,14 @@ interface PubSubOptions {
 }
 ```
 
-Configuration options for PubSub instance.
+- `onError` — custom error handler. Defaults to `console.error`. Pass `() => {}` for silent mode.
 
-**Properties:**
-- `onError` (optional): `ErrorHandler` - Custom error handler for subscriber errors. By default, errors are logged to `console.error`. Set to `() => {}` for silent mode.
+---
+
+### `DefaultEventMap`
+
+```ts
+type DefaultEventMap = Record<string, any>;
+```
+
+Default generic argument for `PubSub<TEvents>` — preserves the dynamic, untyped behavior when no event map is supplied.
